@@ -1,0 +1,37 @@
+name = "playwright-auth-demo"
+main = "src/index.ts"
+compatibility_date = "2024-05-18"
+compatibility_flags = ["nodejs_compat"]
+
+[vars]
+AI_MODEL = "@cf/openai/gpt-oss-120b"
+
+[[r2_buckets]]
+binding = "R2_BUCKET"
+bucket_name = "playwright-auth-demo"
+preview_bucket_name = "playwright-auth-demo-preview"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "playwright-auth-demo"
+database_id = "a495374e-f1a4-452c-9ed7-645408a455b1"
+preview_database_id = "playwright-auth-demo-preview"
+
+[ai]
+binding = "AI"
+
+[browser]
+binding = "BROWSER"
+
+[[durable_objects.bindings]]
+name = "WEBSOCKET_HANDLER_DO"
+class_name = "WebSocketHandlerDO"
+
+[[migrations]]
+tag = "v1"
+new_classes = ["WebSocketHandlerDO"]
+
+# Binding for static assets, served from the "./public" directory
+[assets]
+directory = "./public"
+binding = "ASSETS"

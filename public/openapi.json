@@ -1,0 +1,81 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Playwright Auth Demo API",
+    "description": "AI-driven web scraping with authentication support",
+    "version": "1.0.0"
+  },
+  "servers": [
+    {
+      "url": "https://playwright-auth-demo.workers.dev",
+      "description": "Production server"
+    }
+  ],
+  "paths": {
+    "/ws": {
+      "get": {
+        "summary": "WebSocket connection",
+        "description": "Establish WebSocket connection for real-time scraping operations",
+        "responses": {
+          "101": {
+            "description": "Switching Protocols"
+          }
+        }
+      }
+    },
+    "/api/site-configs": {
+      "get": {
+        "summary": "List all site configurations",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SiteConfig"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/scrapes": {
+      "get": {
+        "summary": "List all scrape jobs",
+        "responses": {
+          "200": {
+            "description": "Success"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "SiteConfig": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "integer" },
+          "url_pattern": { "type": "string" },
+          "username_secret_var": { "type": "string" },
+          "password_secret_var": { "type": "string" },
+          "login_url": { "type": "string" },
+          "login_agent_instructions": { "type": "string" }
+        }
+      },
+      "ScrapeJob": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "integer" },
+          "full_url": { "type": "string" },
+          "status": { "type": "string", "enum": ["not_started", "in_progress", "complete", "error"] },
+          "timestamp": { "type": "string", "format": "date-time" }
+        }
+      }
+    }
+  }
+}
