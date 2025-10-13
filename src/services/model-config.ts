@@ -1,33 +1,52 @@
 /**
- * @fileoverview AI Model Configuration Service
+ * @fileoverview AI Model Configuration Service - Hybrid Vision+Reasoning Architecture
  * 
- * This service manages the 3-model architecture for optimal performance and cost efficiency:
+ * This service implements a best-practice hybrid architecture that separates "seeing" from "thinking":
  * 
- * 1. Vision Model: @cf/llava-hf/llava-1.5-7b-hf
- *    - Purpose: Screenshot analysis and visual understanding
- *    - Strengths: Multimodal instruction-following, visual scene understanding
- *    - Cost: Free/low-cost
+ * ARCHITECTURE OVERVIEW:
+ * =====================
  * 
- * 2. Reasoning Model: @cf/openai/gpt-oss-120b  
- *    - Purpose: Puppeteer action reasoning and automation logic
+ * 1. VISION MODEL (The "Eyes"): @cf/meta/llama-4-scout-17b-16e-instruct
+ *    - Purpose: Screenshot analysis and visual form field identification
+ *    - Role: Analyzes page screenshots to find login fields, buttons, etc.
+ *    - Strengths: Natively multimodal, superior UI element recognition
+ *    - Context: 131,000 tokens (handles full-page screenshots)
+ *    - Cost: $0.27/M input, $0.85/M output (~$0.0002 per screenshot)
+ *    - When to use: When you need to "see" the page layout
+ * 
+ * 2. REASONING MODEL (The "Brain"): @cf/openai/gpt-oss-120b
+ *    - Purpose: Strategic planning, decision making, error handling
+ *    - Role: Decides authentication strategy, handles complex logic
  *    - Strengths: "Powerful reasoning, agentic tasks, versatile developer use cases"
- *    - Context: 128,000 tokens
+ *    - Context: 128,000 tokens (enough for complex decision trees)
  *    - Cost: $0.35/M input, $0.75/M output tokens
+ *    - When to use: When you need to "think" about what to do next
  * 
- * 3. Extraction Model: @cf/meta/llama-4-scout-17b-16e-instruct
- *    - Purpose: Structured job posting data extraction
- *    - Strengths: Natively multimodal, large context window, structured output
- *    - Context: 131,000 tokens (largest available)
+ * 3. EXTRACTION MODEL (The "Processor"): @cf/meta/llama-4-scout-17b-16e-instruct
+ *    - Purpose: Structured job posting data extraction from HTML/text
+ *    - Role: Converts unstructured job content to structured schema
+ *    - Strengths: Multimodal, large context, structured output support
+ *    - Context: 131,000 tokens (largest available for long job posts)
  *    - Cost: $0.27/M input, $0.85/M output tokens
+ *    - When to use: When you need to extract structured data
  * 
- * This configuration optimizes for:
- * - Performance: Each model specialized for its task
- * - Cost: Lower-cost models for appropriate tasks
- * - Accuracy: Purpose-built models vs. one-size-fits-all
+ * WHY THIS ARCHITECTURE?
+ * ======================
+ * - Separation of Concerns: Vision sees, GPT thinks, Llama extracts
+ * - Cost Optimization: Right model for the right job
+ * - Reliability: GPT-120B's superior reasoning reduces failed logins
+ * - Flexibility: Can swap models independently for A/B testing
+ * 
+ * TYPICAL LOGIN FLOW COSTS:
+ * ==========================
+ * - 3 screenshots (Llama 4 Vision): ~$0.0006
+ * - 1 strategy planning (GPT-120B): ~$0.0004
+ * - Total per login: ~$0.001 (much cheaper than failed attempts!)
  * 
  * @author AI Agent Development Team
- * @version 1.0.0
+ * @version 2.0.0
  * @since 2024-01-20
+ * @updated 2025-10-13 - Upgraded to hybrid vision+reasoning architecture
  */
 
 /**
@@ -40,14 +59,29 @@ export const AI_MODELS = {
   /**
    * Vision Model for Screenshot Analysis
    * 
-   * LLaVA 1.5 7B - Optimized for image-to-text conversion
-   * - Best for: Converting screenshots to textual descriptions
-   * - Input: Images + text prompts
-   * - Output: Detailed textual descriptions of visual content
-   * - Cost: Free/low-cost (beta model)
-   * - Performance: Fast, specialized for vision tasks
+   * Llama 4 Scout 17B-16E Instruct - Natively multimodal vision+text model
+   * - Best for: Complex login UI understanding and form element identification
+   * - Architecture: 17B parameters with 16 experts (Mixture-of-Experts)
+   * - Input: Screenshots + contextual prompts
+   * - Output: Structured analysis with industry-leading accuracy
+   * - Context: 131,000 tokens (handles full-page screenshots)
+   * - Cost: $0.27/M input, $0.85/M output (~$0.0002 per screenshot)
+   * 
+   * Why Llama 4 Scout for login automation:
+   * 1. Natively multimodal (built for vision+text, not adapted)
+   * 2. Superior accuracy for distinguishing similar UI elements
+   * 3. Function calling support for structured CSS selector responses
+   * 4. Handles complex multi-step login flows reliably
+   * 5. Async queue support for production concurrent requests
+   * 6. Better resilience to UI variations across different websites
+   * 
+   * Cost justification:
+   * - Screenshots typically use 200-500 tokens
+   * - Cost per login automation: ~$0.0001-0.0005
+   * - Failed login attempts cost more than model inference
+   * - Higher accuracy = fewer retries = lower total cost
    */
-  VISION: '@cf/llava-hf/llava-1.5-7b-hf',
+  VISION: '@cf/meta/llama-4-scout-17b-16e-instruct',
 
   /**
    * Reasoning Model for Action Logic
@@ -77,20 +111,25 @@ export const AI_MODELS = {
 } as const;
 
 /**
- * Model-specific configuration parameters
+ * Task-specific configuration parameters
  * 
- * Optimized settings for each model based on their strengths and use cases.
+ * Optimized settings for each task type regardless of underlying model.
+ * This allows the same model to be used for different tasks with different configs.
  */
-export const MODEL_CONFIGS = {
-  [AI_MODELS.VISION]: {
-    maxTokens: 512,
+export const TASK_CONFIGS = {
+  vision: {
+    model: AI_MODELS.VISION,
+    maxTokens: 1024,
     temperature: 0.1,
-    description: 'Vision analysis model for screenshot understanding',
+    contextWindow: 131000,
+    description: 'Multimodal vision model for login form identification and screenshot analysis',
     task: 'image-to-text',
-    costTier: 'free'
+    costTier: 'standard',
+    specialization: 'multimodal-vision'
   },
 
-  [AI_MODELS.REASONING]: {
+  reasoning: {
+    model: AI_MODELS.REASONING,
     maxTokens: 512,
     temperature: 0.1,
     contextWindow: 128000,
@@ -100,7 +139,8 @@ export const MODEL_CONFIGS = {
     specialization: 'reasoning-and-agents'
   },
 
-  [AI_MODELS.EXTRACTION]: {
+  extraction: {
+    model: AI_MODELS.EXTRACTION,
     maxTokens: 4096,
     temperature: 0.1,
     contextWindow: 131000,
@@ -110,6 +150,12 @@ export const MODEL_CONFIGS = {
     specialization: 'multimodal-extraction'
   }
 } as const;
+
+/**
+ * Legacy MODEL_CONFIGS for backward compatibility
+ * @deprecated Use TASK_CONFIGS instead for clearer intent
+ */
+export const MODEL_CONFIGS = TASK_CONFIGS;
 
 /**
  * Model Selection Service
@@ -138,13 +184,28 @@ export class ModelConfigService {
   }
 
   /**
-   * Get configuration parameters for a specific model
+   * Get configuration parameters for a specific task
+   * 
+   * @param task - The task type
+   * @returns Configuration parameters for the task
+   */
+  static getConfigForTask(task: 'vision' | 'reasoning' | 'extraction') {
+    return TASK_CONFIGS[task];
+  }
+  
+  /**
+   * Get configuration parameters for a specific model (legacy)
    * 
    * @param modelId - The model identifier
    * @returns Configuration parameters for the model
+   * @deprecated Use getConfigForTask instead
    */
   static getConfigForModel(modelId: string) {
-    return MODEL_CONFIGS[modelId as keyof typeof MODEL_CONFIGS];
+    // Map model IDs to tasks
+    if (modelId === AI_MODELS.VISION) return TASK_CONFIGS.vision;
+    if (modelId === AI_MODELS.REASONING) return TASK_CONFIGS.reasoning;
+    if (modelId === AI_MODELS.EXTRACTION) return TASK_CONFIGS.extraction;
+    throw new Error(`Unknown model: ${modelId}`);
   }
 
   /**
@@ -160,17 +221,16 @@ export class ModelConfigService {
     inputTokens: number,
     outputTokens: number
   ): number {
-    const model = this.getModelForTask(task);
-    
-    // Cost per million tokens
-    const costs = {
-      [AI_MODELS.VISION]: { input: 0, output: 0 }, // Free/beta model
-      [AI_MODELS.REASONING]: { input: 0.35, output: 0.75 },
-      [AI_MODELS.EXTRACTION]: { input: 0.27, output: 0.85 }
+    // Cost per million tokens (updated October 2025)
+    // Using task-based pricing to avoid duplicate model keys
+    const taskCosts = {
+      vision: { input: 0.27, output: 0.85 }, // Llama 4 Scout (multimodal)
+      reasoning: { input: 0.35, output: 0.75 }, // GPT-OSS-120B
+      extraction: { input: 0.27, output: 0.85 } // Llama 4 Scout (text)
     };
 
-    const modelCosts = costs[model as keyof typeof costs];
-    return (inputTokens / 1000000 * modelCosts.input) + (outputTokens / 1000000 * modelCosts.output);
+    const costs = taskCosts[task];
+    return (inputTokens / 1000000 * costs.input) + (outputTokens / 1000000 * costs.output);
   }
 
   /**
@@ -182,17 +242,17 @@ export class ModelConfigService {
     const results = {
       vision: {
         model: AI_MODELS.VISION,
-        config: MODEL_CONFIGS[AI_MODELS.VISION],
+        config: TASK_CONFIGS.vision,
         available: true
       },
       reasoning: {
         model: AI_MODELS.REASONING,
-        config: MODEL_CONFIGS[AI_MODELS.REASONING],
+        config: TASK_CONFIGS.reasoning,
         available: true
       },
       extraction: {
         model: AI_MODELS.EXTRACTION,
-        config: MODEL_CONFIGS[AI_MODELS.EXTRACTION],
+        config: TASK_CONFIGS.extraction,
         available: true
       }
     };
@@ -206,4 +266,6 @@ export class ModelConfigService {
  */
 export type ModelTask = 'vision' | 'reasoning' | 'extraction';
 export type ModelId = typeof AI_MODELS[keyof typeof AI_MODELS];
-export type ModelConfig = typeof MODEL_CONFIGS[keyof typeof MODEL_CONFIGS];
+export type TaskConfig = typeof TASK_CONFIGS[keyof typeof TASK_CONFIGS];
+/** @deprecated Use TaskConfig instead */
+export type ModelConfig = TaskConfig;

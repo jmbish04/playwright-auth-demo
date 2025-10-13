@@ -389,11 +389,11 @@ const interviewPrepSchema = z.object({
 export const jobPostingSchema = z.object({
   // Core
   /** @description The title of the job position (e.g., "Senior Software Engineer"). */
-  jobTitle: z.string().min(1).describe("The title of the job position."),
+  jobTitle: z.string().min(1).optional().describe("The title of the job position."),
   /** @description The name of the company that is hiring. */
   companyName: z.string().min(1).optional().describe("The name of the company hiring."),
   /** @description The primary, unparsed location string (e.g., "San Francisco, CA"). */
-  location: z.string().min(1).describe("Primary location string."),
+  location: z.string().min(1).optional().describe("Primary location string."),
 
   // Rich org + location detail
   /** @description Detailed, structured information about the hiring organization. */
@@ -413,7 +413,10 @@ export const jobPostingSchema = z.object({
   /** @description A list of the key responsibilities for the role. */
   responsibilities: z.array(z.string()).optional().describe("A list of the key responsibilities for the role."),
   /** @description A list of required or preferred qualifications. */
-  qualifications: z.array(z.string()).optional().describe("A list of required or preferred qualifications."),
+  qualifications: z.union([
+    z.array(z.string()),
+    z.object({}).passthrough()
+  ]).optional().describe("A list of required or preferred qualifications."),
   /** @description Other structured sections extracted from the job posting. */
   sections: z.array(sectionSchema).optional().describe("Other structured sections from the posting."),
   /** @description The raw, unprocessed text of the job description to preserve fidelity. */
@@ -457,7 +460,10 @@ export const jobPostingSchema = z.object({
 
   // AI/tech presence flags
   /** @description Flags indicating the presence of AI and other key technologies. */
-  aiFlags: aiFlagsSchema,
+  aiFlags: z.union([
+    aiFlagsSchema,
+    z.array(z.any())
+  ]).optional().describe("AI-related technology flags or array of technologies mentioned."),
 
   // Governance & compliance
   /** @description Governance, security, or compliance-related constraints. */

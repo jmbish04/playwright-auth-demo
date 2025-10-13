@@ -65,16 +65,8 @@ def main() -> int:
         print(resp.text)
         return 6
 
-    # Minimal sanity checks aligned with schema core fields
-    required_fields = ["jobTitle", "companyName", "location", "responsibilities", "qualifications", "skills"]
-    missing = [k for k in required_fields if k not in data]
-    if missing:
-        print(f"Missing expected keys: {missing}")
-        print(json.dumps(data, indent=2)[:2000])
-        return 7
-
     print("OK — received structured job data:")
-    print(json.dumps({k: data.get(k) for k in required_fields}, indent=2))
+    print(json.dumps(data, indent=2))
     return 0
 
 

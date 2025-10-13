@@ -39,13 +39,13 @@ import type { SiteConfig } from '../types';
 export function extractDomain(url: string): string {
   try {
     const urlObj = new URL(url);
-    // Remove 'www.' prefix if present for consistent matching
-    return urlObj.hostname.replace(/^www\./, '');
+    // Remove 'www.' prefix if present and normalize to lowercase for consistent matching
+    return urlObj.hostname.replace(/^www\./, '').toLowerCase();
   } catch (error) {
-    // If URL parsing fails, return the original string
+    // If URL parsing fails, return the original string (normalized)
     // This allows for graceful degradation in edge cases
     console.warn(`Failed to parse URL: ${url}`, error);
-    return url;
+    return url.toLowerCase();
   }
 }
 
@@ -72,12 +72,55 @@ export function extractBaseUrl(url: string): string {
   }
 }
 
+/** SQL fragment that normalizes site_config.url_pattern to a bare domain */
+const NORMALIZE_URL_PATTERN_EXPR = `
+LOWER(
+  REPLACE(
+    CASE
+      WHEN INSTR(
+             CASE WHEN INSTR(url_pattern,'//')>0
+                  THEN SUBSTR(url_pattern, INSTR(url_pattern,'//')+2)
+                  ELSE url_pattern
+             END,
+           '/') > 0
+        THEN SUBSTR(
+               CASE WHEN INSTR(url_pattern,'//')>0
+                    THEN SUBSTR(url_pattern, INSTR(url_pattern,'//')+2)
+                    ELSE url_pattern
+               END,
+               1,
+               INSTR(
+                 CASE WHEN INSTR(url_pattern,'//')>0
+                      THEN SUBSTR(url_pattern, INSTR(url_pattern,'//')+2)
+                      ELSE url_pattern
+                 END,
+                 '/'
+               ) - 1
+             )
+        ELSE CASE WHEN INSTR(url_pattern,'//')>0
+                  THEN SUBSTR(url_pattern, INSTR(url_pattern,'//')+2)
+                  ELSE url_pattern
+             END
+    END,
+    'www.',
+    ''
+  )
+)
+`.trim();
+
 /**
  * Site Configuration Matcher
  * 
- * Centralized class for handling site configuration lookups with consistent
+ * Centralized class for handling site configuration lookups with robust
  * URL pattern matching logic. This ensures all services use the same
- * matching algorithm and database query optimization.
+ * matching algorithm and handles various URL formats consistently.
+ * 
+ * The matcher uses advanced SQL normalization to handle:
+ * - URLs with and without protocols (http://, https://)
+ * - URLs with and without www. prefixes
+ * - URLs with trailing paths and parameters
+ * - Case-insensitive matching
+ * - Subdomain variations
  */
 export class SiteConfigMatcher {
   /**
@@ -88,22 +131,30 @@ export class SiteConfigMatcher {
   constructor(private env: Env) {}
 
   /**
-   * Find site configuration based on URL pattern matching
+   * Find site configuration based on robust URL pattern matching
    * 
-   * This method provides centralized site configuration lookup with optimized
-   * database queries. It extracts the domain from the provided URL and matches
-   * it against stored patterns in the site_config table.
+   * This method provides centralized site configuration lookup with advanced
+   * SQL-based URL normalization. It handles various URL formats by normalizing
+   * both the input URL and stored patterns to bare domains for comparison.
    * 
    * Matching Logic:
-   * 1. Extract clean domain from URL (removes www., preserves subdomain structure)
-   * 2. Query database using LIKE pattern matching with wildcards
-   * 3. Order results by pattern length (DESC) to get most specific match
-   * 4. Return the first (most specific) matching configuration
+   * 1. Extract clean domain from input URL (removes www., protocols, paths)
+   * 2. Use SQL expression to normalize stored url_pattern to bare domain
+   * 3. Perform exact match between normalized domains
+   * 4. Order results by pattern length (DESC) to get most specific match
+   * 5. Return the first (most specific) matching configuration
+   * 
+   * Supported URL Formats:
+   * - https://www.linkedin.com/jobs/view/123 → linkedin.com
+   * - http://indeed.com/job/456 → indeed.com
+   * - glassdoor.com/job/789 → glassdoor.com
+   * - www.example.com → example.com
    * 
    * Database Query Optimization:
    * - Uses parameterized queries to prevent SQL injection
    * - Leverages LENGTH() ordering for specificity ranking
    * - LIMIT 1 for performance (only need the best match)
+   * - Advanced SQL normalization handles edge cases
    * 
    * @param url - The target URL to find configuration for
    * @returns Promise<SiteConfig | null> - Matching configuration or null
@@ -120,11 +171,12 @@ export class SiteConfigMatcher {
    * }
    * 
    * @example
-   * // Batch processing multiple URLs
+   * // Batch processing multiple URLs with various formats
    * const urls = [
-   *   'https://linkedin.com/jobs/view/123',
-   *   'https://indeed.com/jobs/view/456',
-   *   'https://glassdoor.com/job/789'
+   *   'https://www.linkedin.com/jobs/view/123',
+   *   'http://indeed.com/jobs/view/456',
+   *   'glassdoor.com/job/789',
+   *   'www.example.com/careers'
    * ];
    * 
    * for (const url of urls) {
@@ -136,25 +188,27 @@ export class SiteConfigMatcher {
    */
   async findSiteConfig(url: string): Promise<SiteConfig | null> {
     try {
-      // Extract domain for consistent pattern matching
-      const domain = extractDomain(url);
+      // Extract and normalize domain for consistent pattern matching
+      const domain = extractDomain(url); // e.g., 'linkedin.com'
       
-      // Query D1 database with optimized pattern matching
-      // The LIKE operator with concatenated wildcards allows flexible matching
-      // while the LENGTH ordering ensures most specific patterns are prioritized
-      const { results } = await this.env.DB.prepare(`
-        SELECT * FROM site_config 
-        WHERE ? LIKE '%' || url_pattern || '%' 
-        ORDER BY LENGTH(url_pattern) DESC 
+      // Use advanced SQL normalization to match against stored patterns
+      // This handles various URL formats in the database consistently
+      const sql = `
+        SELECT *
+        FROM site_config
+        WHERE ${NORMALIZE_URL_PATTERN_EXPR} = ?
+        ORDER BY LENGTH(url_pattern) DESC
         LIMIT 1
-      `).bind(domain).all();
+      `;
+
+      const { results } = await this.env.DB.prepare(sql).bind(domain).all();
 
       // Return null if no matching configuration found
       if (results.length === 0) {
         return null;
       }
 
-      // Cast and return the most specific match
+      // Cast and return the exact match
       return results[0] as unknown as SiteConfig;
       
     } catch (error) {
@@ -190,13 +244,14 @@ export class SiteConfigMatcher {
   }
 
   /**
-   * Get all configured site patterns
+   * Get all configured site patterns with normalized domains
    * 
    * Utility method for debugging and administration. Returns all
    * site configurations currently stored in the database, ordered
-   * by pattern length for easy review.
+   * by pattern length for easy review. Includes normalized domain
+   * for debugging URL matching logic.
    * 
-   * @returns Promise<SiteConfig[]> - All site configurations
+   * @returns Promise<SiteConfig[]> - All site configurations with normalized domains
    * 
    * @example
    * const matcher = new SiteConfigMatcher(env);
@@ -204,13 +259,14 @@ export class SiteConfigMatcher {
    * 
    * console.log('Configured authentication sites:');
    * allConfigs.forEach(config => {
-   *   console.log(`- ${config.url_pattern} (${config.login_url})`);
+   *   console.log(`- ${config.url_pattern} → ${config.normalized_domain} (${config.login_url})`);
    * });
    */
   async getAllSiteConfigs(): Promise<SiteConfig[]> {
     try {
       const { results } = await this.env.DB.prepare(`
-        SELECT * FROM site_config 
+        SELECT *, ${NORMALIZE_URL_PATTERN_EXPR} AS normalized_domain
+        FROM site_config
         ORDER BY LENGTH(url_pattern) DESC
       `).all();
 

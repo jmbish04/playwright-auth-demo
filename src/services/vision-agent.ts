@@ -252,7 +252,7 @@ export class VisionAgent {
   private async getVisionDescription(screenshot: Buffer, prompt: string): Promise<string> {
     try {
       // Use optimized vision model from configuration
-      const visionConfig = MODEL_CONFIGS[AI_MODELS.VISION];
+      const visionConfig = MODEL_CONFIGS.vision;
       const response = await this.env.AI.run(AI_MODELS.VISION as any, {
         image: Array.from(new Uint8Array(screenshot)),  // Convert buffer to Uint8Array for AI model
         prompt: prompt,                          // Guide the vision analysis with specific prompt
@@ -381,7 +381,7 @@ IMPORTANT:
 
     try {
       // Use optimized reasoning model from configuration
-      const reasoningConfig = MODEL_CONFIGS[AI_MODELS.REASONING];
+      const reasoningConfig = MODEL_CONFIGS.reasoning;
       const response = await this.env.AI.run(AI_MODELS.REASONING as any, {
         messages: [
           {
@@ -499,6 +499,112 @@ IMPORTANT:
     } catch (error) {
       console.error('Job data extraction failed:', error);
       throw new Error(`Failed to extract job data: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  /**
+   * Analyze page content to determine if authentication is required
+   * 
+   * This method takes a screenshot of the current page and uses AI vision
+   * to determine if the page is showing a login screen or authentication
+   * requirement.
+   * 
+   * @param page - Puppeteer page instance
+   * @param url - The URL being analyzed
+   * @returns Promise<{requiresAuth: boolean, reasoning: string, confidence: number}>
+   */
+  async analyzePageForAuthentication(page: Page, url: string): Promise<{
+    requiresAuth: boolean;
+    reasoning: string;
+    confidence: number;
+    pageType: string;
+  }> {
+    try {
+      // Take a screenshot for analysis
+      const screenshot = await page.screenshot({ fullPage: true });
+      const screenshotBase64 = screenshot.toString('base64');
+      
+      // Get page title and basic content for context
+      const title = await page.title();
+      const htmlContent = await page.content();
+      
+      const prompt = `
+You are an expert at analyzing web pages to detect authentication requirements. 
+Analyze this screenshot and page content to determine if the user needs to log in.
+
+CONTEXT:
+- URL: ${url}
+- Page Title: ${title}
+- HTML Preview: ${htmlContent.substring(0, 2000)}...
+
+ANALYSIS TASK:
+Look for signs that authentication/login is required:
+- Login forms (username/email and password fields)
+- "Sign in" or "Log in" buttons
+- Authentication modals or overlays
+- "Please log in to continue" messages
+- Blocked content with login prompts
+- Social login buttons (Google, LinkedIn, etc.)
+- Registration/signup forms
+
+Also consider:
+- Is this a public page that should be accessible without login?
+- Are there clear signs the content is blocked/restricted?
+- Does the page layout suggest it's a login screen?
+
+Respond with JSON only:
+{
+  "requiresAuth": boolean,
+  "reasoning": "detailed explanation of what you see and why authentication is/isn't needed",
+  "confidence": number between 0 and 1,
+  "pageType": "login_screen|blocked_content|public_page|error_page|loading_page"
+}`;
+
+      const response = await this.env.AI.run('@cf/meta/llama-4-scout-17b-16e-instruct', {
+        messages: [
+          {
+            role: 'system',
+            content: 'You are a web page authentication detection expert. Always respond with valid JSON only.'
+          },
+          {
+            role: 'user',
+            content: [
+              {
+                type: 'text',
+                text: prompt
+              },
+              {
+                type: 'image_url',
+                image_url: {
+                  url: `data:image/png;base64,${screenshotBase64}`
+                }
+              }
+            ]
+          }
+        ],
+        response_format: { type: 'json_object' },
+        max_tokens: 1024,
+        temperature: 0.1
+      });
+
+      const analysis = JSON.parse(response.response);
+      
+      return {
+        requiresAuth: analysis.requiresAuth || false,
+        reasoning: analysis.reasoning || 'No reasoning provided',
+        confidence: Math.max(0, Math.min(1, analysis.confidence || 0.5)),
+        pageType: analysis.pageType || 'unknown'
+      };
+
+    } catch (error) {
+      console.error('Authentication analysis failed:', error);
+      // Default to requiring auth if analysis fails - safer approach
+      return {
+        requiresAuth: true,
+        reasoning: `Analysis failed: ${error instanceof Error ? error.message : String(error)}. Defaulting to requiring authentication for safety.`,
+        confidence: 0.1,
+        pageType: 'error'
+      };
     }
   }
 }

@@ -169,12 +169,13 @@ export class AuthService {
   /**
    * Handle username/email input step of authentication
    * 
-   * Uses AI vision to identify the username or email input field on the login page
-   * and fills it with the provided credentials. This method is designed to work
-   * across different sites with varying form layouts.
+   * Uses a hybrid approach: tries common selectors first, falls back to AI vision if needed.
+   * This provides both speed (for known sites) and flexibility (for unknown sites).
    * 
-   * The AI analyzes the page screenshot to understand the form structure and
-   * identify the appropriate input field, making it resilient to UI changes.
+   * Common selector patterns:
+   * - input[type="email"], input[type="text"][name*="email"]
+   * - input[name="username"], input[name="session_key"] (LinkedIn)
+   * - input[id="username"], input[id="email"]
    * 
    * @param page - Puppeteer page instance
    * @param username - Username or email to enter
@@ -184,37 +185,82 @@ export class AuthService {
    * @private
    */
   private async handleUsernameStep(page: Page, username: string, siteConfig: SiteConfig): Promise<void> {
-    // Define the goal for AI vision analysis
-    const goal = "I need to enter my username/email to log in. Find and fill the username/email input field.";
-    
-    // Use AI vision to analyze the page and determine the next action
-    // This leverages the 3-model approach: LLaVA for vision → GPT-OSS-120B for reasoning
-    const analysis = await this.visionAgent.analyzePageForAction(page, goal);
-    
-    // Execute the action if AI identified a valid input field
-    if (analysis.action === 'type' && analysis.selector) {
-      // Wait for the element to be available in the DOM
-      await page.waitForSelector(analysis.selector, { timeout: 10000 });
+    // Try common username/email field selectors first
+    const commonSelectors = [
+      'input[type="email"]',
+      'input[name="username"]',
+      'input[name="email"]',
+      'input[name="session_key"]',  // LinkedIn
+      'input[id="username"]',
+      'input[id="email"]',
+      'input[name*="user"]',
+      'input[name*="email"]',
+      'input[placeholder*="email" i]',
+      'input[placeholder*="username" i]'
+    ];
+
+    let selector: string | null = null;
+
+    // Try each common selector
+    for (const testSelector of commonSelectors) {
+      try {
+        const element = await page.$(testSelector);
+        if (element) {
+          // Verify it's visible and interactable
+          const isVisible = await page.evaluate((sel) => {
+            const el = document.querySelector(sel);
+            if (!el) return false;
+            const rect = el.getBoundingClientRect();
+            return rect.width > 0 && rect.height > 0;
+          }, testSelector);
+          
+          if (isVisible) {
+            selector = testSelector;
+            console.log(`Found username field using selector: ${selector}`);
+            break;
+          }
+        }
+      } catch (e) {
+        // Continue to next selector
+        continue;
+      }
+    }
+
+    // If no common selector worked, try AI vision as fallback
+    if (!selector) {
+      console.log('Common selectors failed, falling back to AI vision');
+      const goal = "I need to enter my username/email to log in. Find and fill the username/email input field.";
+      const analysis = await this.visionAgent.analyzePageForAction(page, goal);
       
-      // Click to focus the input field
-      await page.click(analysis.selector);
-      
-      // Type username with human-like delays between keystrokes
-      await page.type(analysis.selector, username, { delay: this.getRandomDelay() });
-      
-      // Brief pause to allow for any form validation or UI updates
+      if (analysis.action === 'type' && analysis.selector) {
+        selector = analysis.selector;
+        console.log(`AI vision found username field: ${selector}`);
+      } else {
+        throw new Error('Could not find username input field with common selectors or AI vision');
+      }
+    }
+
+    // Fill the username field
+    try {
+      await page.waitForSelector(selector, { timeout: 5000 });
+      await page.click(selector);
+      await page.type(selector, username, { delay: this.getRandomDelay() });
       await this.sleep(1000);
-    } else {
-      throw new Error('Could not find username input field');
+    } catch (error) {
+      throw new Error(`Failed to fill username field: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
   /**
    * Handle password input step of authentication
    * 
-   * Similar to username handling, this method uses AI vision to identify
-   * the password input field and fill it with credentials. It handles
-   * various password field types and layouts.
+   * Uses a hybrid approach: tries common selectors first, falls back to AI vision if needed.
+   * This provides both speed and reliability.
+   * 
+   * Common selector patterns:
+   * - input[type="password"]
+   * - input[name="password"], input[name="session_password"] (LinkedIn)
+   * - input[id="password"]
    * 
    * @param page - Puppeteer page instance
    * @param password - Password to enter
@@ -224,36 +270,79 @@ export class AuthService {
    * @private
    */
   private async handlePasswordStep(page: Page, password: string, siteConfig: SiteConfig): Promise<void> {
-    // Define the goal for AI vision analysis
-    const goal = "I need to enter my password to log in. Find and fill the password input field.";
-    
-    // Use AI vision to analyze the page and identify password field
-    const analysis = await this.visionAgent.analyzePageForAction(page, goal);
-    
-    // Execute the action if AI identified a valid password field
-    if (analysis.action === 'type' && analysis.selector) {
-      // Wait for the password field to be available
-      await page.waitForSelector(analysis.selector, { timeout: 10000 });
+    // Try common password field selectors first
+    const commonSelectors = [
+      'input[type="password"]',
+      'input[name="password"]',
+      'input[name="session_password"]',  // LinkedIn
+      'input[id="password"]',
+      'input[name*="pass"]',
+      'input[placeholder*="password" i]'
+    ];
+
+    let selector: string | null = null;
+
+    // Try each common selector
+    for (const testSelector of commonSelectors) {
+      try {
+        const element = await page.$(testSelector);
+        if (element) {
+          // Verify it's visible and interactable
+          const isVisible = await page.evaluate((sel) => {
+            const el = document.querySelector(sel);
+            if (!el) return false;
+            const rect = el.getBoundingClientRect();
+            return rect.width > 0 && rect.height > 0;
+          }, testSelector);
+          
+          if (isVisible) {
+            selector = testSelector;
+            console.log(`Found password field using selector: ${selector}`);
+            break;
+          }
+        }
+      } catch (e) {
+        // Continue to next selector
+        continue;
+      }
+    }
+
+    // If no common selector worked, try AI vision as fallback
+    if (!selector) {
+      console.log('Common selectors failed, falling back to AI vision');
+      const goal = "I need to enter my password to log in. Find and fill the password input field.";
+      const analysis = await this.visionAgent.analyzePageForAction(page, goal);
       
-      // Click to focus the password field
-      await page.click(analysis.selector);
-      
-      // Type password with human-like delays
-      await page.type(analysis.selector, password, { delay: this.getRandomDelay() });
-      
-      // Brief pause for form validation
+      if (analysis.action === 'type' && analysis.selector) {
+        selector = analysis.selector;
+        console.log(`AI vision found password field: ${selector}`);
+      } else {
+        throw new Error('Could not find password input field with common selectors or AI vision');
+      }
+    }
+
+    // Fill the password field
+    try {
+      await page.waitForSelector(selector, { timeout: 5000 });
+      await page.click(selector);
+      await page.type(selector, password, { delay: this.getRandomDelay() });
       await this.sleep(1000);
-    } else {
-      throw new Error('Could not find password input field');
+    } catch (error) {
+      throw new Error(`Failed to fill password field: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
   /**
    * Handle login form submission
    * 
-   * Uses AI vision to identify and click the login/submit button. This method
-   * handles various button types (submit buttons, links, etc.) and waits for
+   * Uses a hybrid approach: tries common selectors first, falls back to AI vision if needed.
+   * This method handles various button types (submit buttons, links, etc.) and waits for
    * the resulting navigation or page changes.
+   * 
+   * Common selector patterns:
+   * - button[type="submit"]
+   * - button containing "sign in", "log in", "login"
+   * - LinkedIn specific: button[data-id="sign-in-form__submit-btn"]
    * 
    * @param page - Puppeteer page instance
    * @param siteConfig - Site configuration for context
@@ -262,28 +351,109 @@ export class AuthService {
    * @private
    */
   private async handleSubmitStep(page: Page, siteConfig: SiteConfig): Promise<void> {
-    // Define the goal for AI vision analysis
-    const goal = "I need to submit the login form. Find and click the login/sign-in button.";
-    
-    // Use AI vision to identify the submit button
-    const analysis = await this.visionAgent.analyzePageForAction(page, goal);
-    
-    // Execute the click action if AI identified a submit button
-    if (analysis.action === 'click' && analysis.selector) {
-      // Wait for the submit button to be available
-      await page.waitForSelector(analysis.selector, { timeout: 10000 });
+    // Try common submit button selectors first
+    const commonSelectors = [
+      'button[type="submit"]',
+      'input[type="submit"]',
+      'button[data-id="sign-in-form__submit-btn"]',  // LinkedIn
+      'button[name="submit"]',
+      'button[id*="submit"]',
+      'button[id*="login"]',
+      'button[id*="signin"]'
+    ];
+
+    let selector: string | null = null;
+
+    // Try each common selector
+    for (const testSelector of commonSelectors) {
+      try {
+        const element = await page.$(testSelector);
+        if (element) {
+          // Verify it's visible and interactable
+          const isVisible = await page.evaluate((sel) => {
+            const el = document.querySelector(sel);
+            if (!el) return false;
+            const rect = el.getBoundingClientRect();
+            return rect.width > 0 && rect.height > 0;
+          }, testSelector);
+          
+          if (isVisible) {
+            selector = testSelector;
+            console.log(`Found submit button using selector: ${selector}`);
+            break;
+          }
+        }
+      } catch (e) {
+        // Continue to next selector
+        continue;
+      }
+    }
+
+    // If no common selector worked, try finding by button text
+    if (!selector) {
+      try {
+        const buttonTexts = ['sign in', 'log in', 'login', 'submit', 'continue'];
+        for (const text of buttonTexts) {
+          const found = await page.evaluate((searchText) => {
+            const buttons = Array.from(document.querySelectorAll('button, input[type="submit"]'));
+            const button = buttons.find(btn => 
+              btn.textContent?.toLowerCase().includes(searchText) ||
+              (btn as HTMLInputElement).value?.toLowerCase().includes(searchText)
+            );
+            
+            if (button) {
+              // Add a temporary ID for selection
+              const tempId = 'temp-submit-btn-' + Date.now();
+              button.setAttribute('data-temp-id', tempId);
+              return tempId;
+            }
+            return null;
+          }, text);
+          
+          if (found) {
+            selector = `[data-temp-id="${found}"]`;
+            console.log(`Found submit button by text: "${text}"`);
+            break;
+          }
+        }
+      } catch (e) {
+        console.log('Button text search failed:', e);
+      }
+    }
+
+    // If no common selector worked, try AI vision as fallback
+    if (!selector) {
+      console.log('Common selectors failed, falling back to AI vision');
+      const goal = "I need to submit the login form. Find and click the login/sign-in button.";
+      const analysis = await this.visionAgent.analyzePageForAction(page, goal);
       
-      // Click submit button and wait for navigation
-      // Many login forms redirect after successful submission
-      await Promise.all([
-        page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 30000 }),
-        page.click(analysis.selector)
-      ]);
+      if (analysis.action === 'click' && analysis.selector) {
+        selector = analysis.selector;
+        console.log(`AI vision found submit button: ${selector}`);
+      } else {
+        throw new Error('Could not find login submit button with common selectors or AI vision');
+      }
+    }
+
+    // Click submit button and wait for navigation
+    try {
+      await page.waitForSelector(selector, { timeout: 5000 });
+      
+      // Try to wait for navigation, but don't fail if it doesn't happen
+      try {
+        await Promise.all([
+          page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 10000 }),
+          page.click(selector)
+        ]);
+      } catch (navError) {
+        // Navigation might not happen (e.g., single-page app), that's okay
+        console.log('Navigation did not occur or timed out, continuing');
+      }
       
       // Allow time for post-login page to stabilize
       await this.sleep(3000);
-    } else {
-      throw new Error('Could not find login submit button');
+    } catch (error) {
+      throw new Error(`Failed to click submit button: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 

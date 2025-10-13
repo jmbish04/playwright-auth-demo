@@ -53,10 +53,8 @@ export class WebSocketHandlerDO {
     if (url.pathname === '/broadcast' && request.method === 'POST') {
       try {
         const logEvent = await request.json();
-        this.broadcast({
-          type: 'log',
-          event: logEvent
-        });
+        const frontendMessage = this.transformLogEventForFrontend(logEvent);
+        this.broadcast(frontendMessage);
         return new Response('OK', { status: 200 });
       } catch (error) {
         console.error('Failed to handle broadcast request:', error);
@@ -92,6 +90,75 @@ export class WebSocketHandlerDO {
     return new Response(null, { status: 101, webSocket: client });
   }
 
+  /**
+   * @method transformLogEventForFrontend
+   * @description Transforms internal log events into frontend-compatible message formats
+   * @param {any} logEvent - The internal log event
+   * @returns {any} Frontend-compatible message
+   */
+  transformLogEventForFrontend(logEvent: any): any {
+    // Handle screenshot events
+    if (logEvent.screenshot) {
+      return {
+        type: 'vision_update',
+        data: {
+          description: logEvent.message,
+          imageUrl: `data:image/png;base64,${logEvent.screenshot}`,
+          timestamp: logEvent.timestamp,
+          category: logEvent.category
+        }
+      };
+    }
+
+    // Handle AI thoughts
+    if (logEvent.category === 'ai' && logEvent.data?.reasoning) {
+      return {
+        type: 'ai_thought',
+        data: {
+          message: logEvent.message,
+          reasoning: logEvent.data.reasoning,
+          timestamp: logEvent.timestamp,
+          additionalData: logEvent.data
+        }
+      };
+    }
+
+    // Handle performance metrics
+    if (logEvent.category === 'performance' && logEvent.duration) {
+      return {
+        type: 'performance_update',
+        data: {
+          operation: logEvent.message,
+          duration: logEvent.duration,
+          timestamp: logEvent.timestamp,
+          additionalData: logEvent.data
+        }
+      };
+    }
+
+    // Handle errors
+    if (logEvent.level === 'error') {
+      return {
+        type: 'error',
+        error: logEvent.message,
+        timestamp: logEvent.timestamp,
+        category: logEvent.category,
+        data: logEvent.data
+      };
+    }
+
+    // Handle general status updates
+    return {
+      type: 'status_update',
+      data: {
+        level: logEvent.level,
+        category: logEvent.category,
+        message: logEvent.message,
+        timestamp: logEvent.timestamp,
+        additionalData: logEvent.data
+      }
+    };
+  }
 
   /**
    * @method broadcast

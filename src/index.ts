@@ -231,17 +231,6 @@ async function handleJobExtraction(request: Request, env: Env): Promise<Response
       services: ['AuthService', 'VisionAgent', 'Llama4Service'] 
     });
 
-    // Check if the target URL requires authentication by querying D1 database
-    // This lookup matches URL patterns to site configurations
-    logger.info('system', 'Checking for site authentication configuration');
-    const siteConfig = await authService.getSiteConfig(requestData.url);
-    
-    if (siteConfig) {
-      logger.info('system', `Found authentication configuration for ${siteConfig.url_pattern}`, { siteConfig });
-    } else {
-      logger.info('system', 'No authentication required for this site');
-    }
-    
     // Launch Puppeteer browser with Cloudflare's Browser Rendering API
     logger.info('puppeteer', 'Launching browser instance');
     const browserTimer = new PerformanceTimer(logger, 'Browser Launch');
@@ -259,37 +248,7 @@ async function handleJobExtraction(request: Request, env: Env): Promise<Response
     logger.puppeteerAction('setViewport', undefined, { width: 1920, height: 1080 });
     await page.setViewport({ width: 1920, height: 1080 });
 
-    let authResult = null;
-    
-    // Perform authentication if site configuration was found
-    if (siteConfig) {
-      logger.info('system', `Authentication required for ${siteConfig.url_pattern}`);
-      
-      // Use AI-guided authentication - the AuthService uses vision analysis
-      // to understand login forms and automatically fill credentials
-      const authTimer = new PerformanceTimer(logger, 'Authentication');
-      logger.info('system', 'Starting AI-guided authentication process');
-      
-      const authSuccess = await authService.authenticate(page, siteConfig);
-      authTimer.end({ success: authSuccess });
-      
-      if (!authSuccess) {
-        logger.error('system', 'Authentication failed');
-        overallTimer.end({ success: false, error: 'Authentication failed' });
-        
-        // Authentication failed - return 401 with timing metrics
-        return Response.json({
-          success: false,
-          error: 'Authentication failed',
-          processingTime: Date.now() - startTime
-        } as JobExtractionResponse, { status: 401 });
-      }
-      
-      logger.success('system', 'Authentication completed successfully');
-      authResult = { success: true, message: 'Authentication successful' };
-    }
-
-    // Navigate to the target job posting URL
+    // Navigate to the target job posting URL first to see what we encounter
     logger.info('puppeteer', `Navigating to target URL: ${requestData.url}`);
     const navTimer = new PerformanceTimer(logger, 'Page Navigation');
     
@@ -298,6 +257,91 @@ async function handleJobExtraction(request: Request, env: Env): Promise<Response
       timeout: 30000                  // 30 second timeout
     });
     navTimer.end({ url: requestData.url });
+
+    // Allow page to stabilize and take initial screenshot for AI analysis
+    logger.info('puppeteer', 'Waiting for page to stabilize (3 seconds)');
+    await new Promise(resolve => setTimeout(resolve, 3000));
+
+    logger.info('puppeteer', 'Capturing initial page screenshot for AI analysis');
+    const initialScreenshotTimer = new PerformanceTimer(logger, 'Initial Screenshot');
+    const initialScreenshot = await page.screenshot({ fullPage: true });
+    const initialScreenshotBase64 = initialScreenshot.toString('base64');
+    initialScreenshotTimer.end({ size: initialScreenshot.length });
+
+    logger.screenshot('Initial page loaded - analyzing content', initialScreenshotBase64, {
+      url: requestData.url,
+      timestamp: new Date().toISOString(),
+      purpose: 'initial_analysis'
+    });
+
+    // Use AI to analyze the initial page and determine if authentication is needed
+    logger.info('ai', 'Analyzing initial page content to detect authentication requirements');
+    const pageAnalysis = await visionAgent.analyzePageForAuthentication(page, requestData.url);
+    
+    logger.aiThought('Initial page analysis completed', 
+      `Analyzed page content and detected: ${pageAnalysis.requiresAuth ? 'Authentication required' : 'No authentication needed'}`, 
+      pageAnalysis
+    );
+
+    let authResult = null;
+    
+    // If AI detected authentication is needed, check for site configuration
+    if (pageAnalysis.requiresAuth) {
+      logger.info('system', 'AI detected authentication requirement - checking for site configuration');
+      const authService = new AuthService(env);
+      const siteConfig = await authService.getSiteConfig(requestData.url);
+      
+      if (siteConfig) {
+        logger.info('system', `Found authentication configuration for ${siteConfig.url_pattern}`, { siteConfig });
+        
+        // Use AI-guided authentication - the AuthService uses vision analysis
+        // to understand login forms and automatically fill credentials
+        const authTimer = new PerformanceTimer(logger, 'Authentication');
+        logger.info('system', 'Starting AI-guided authentication process');
+        
+        const authSuccess = await authService.authenticate(page, siteConfig);
+        authTimer.end({ success: authSuccess });
+        
+        if (!authSuccess) {
+          logger.error('system', 'Authentication failed');
+          overallTimer.end({ success: false, error: 'Authentication failed' });
+          
+          // Authentication failed - return 401 with timing metrics
+          return Response.json({
+            success: false,
+            error: 'Authentication failed',
+            processingTime: Date.now() - startTime
+          } as JobExtractionResponse, { status: 401 });
+        }
+        
+        logger.success('system', 'Authentication completed successfully');
+        authResult = { success: true, message: 'Authentication successful' };
+        
+        // Navigate back to the job URL after successful authentication
+        logger.info('puppeteer', `Re-navigating to target URL after authentication: ${requestData.url}`);
+        await page.goto(requestData.url, { 
+          waitUntil: 'domcontentloaded',
+          timeout: 30000 
+        });
+        
+      } else {
+        logger.error('system', 'Authentication required but no site configuration found');
+        logger.aiThought('Authentication configuration missing', 
+          `The page requires authentication but no configuration exists for domain: ${new URL(requestData.url).hostname}`,
+          { domain: new URL(requestData.url).hostname, url: requestData.url }
+        );
+        
+        overallTimer.end({ success: false, error: 'Authentication required but not configured' });
+        
+        return Response.json({
+          success: false,
+          error: 'Authentication required but not configured for this site',
+          processingTime: Date.now() - startTime
+        } as JobExtractionResponse, { status: 401 });
+      }
+    } else {
+      logger.info('system', 'AI determined no authentication required - proceeding with extraction');
+    }
 
     // Allow page to fully stabilize - important for dynamic content
     // Many job sites load content asynchronously after initial page load

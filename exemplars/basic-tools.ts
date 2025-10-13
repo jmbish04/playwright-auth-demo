@@ -1,3 +1,33 @@
+/**
+ * AUTHENTICATION APPROACHES IN PUPPETEER/PLAYWRIGHT
+ * 
+ * There are two main approaches to handling authentication:
+ * 
+ * 1. HTTP BASIC AUTHENTICATION (page.authenticate)
+ *    - For sites using browser's native HTTP authentication dialog
+ *    - NOT for form-based logins like LinkedIn, Indeed, etc.
+ *    - Example: await page.authenticate({ username: 'user', password: 'pass' })
+ *    - This sets Authorization header for HTTP Basic Auth
+ * 
+ * 2. FORM-BASED AUTHENTICATION (DOM manipulation)
+ *    - For sites with login forms (username/password fields)
+ *    - Most job sites use this approach
+ *    - Two methods:
+ *      a) Direct selectors (faster, more reliable)
+ *      b) AI vision (flexible, slower)
+ * 
+ * RECOMMENDED HYBRID APPROACH (implemented in auth-service.ts):
+ * 1. Try common selectors first (input[type="email"], input[type="password"], etc.)
+ * 2. Use page.evaluate() for DOM visibility checks
+ * 3. Fall back to AI vision only if common selectors fail
+ * 
+ * This provides:
+ * - Speed: Most sites work with common selectors
+ * - Reliability: Direct DOM manipulation is faster than AI
+ * - Flexibility: AI vision handles edge cases
+ * - Cost: Minimize expensive AI calls
+ */
+
 // import { runWithTools } from "@cloudflare/ai-utils";
 // import puppeteer from 'puppeteer';
 
@@ -14,7 +44,14 @@
 //     // Define function
 //     const scrapeWebsite = async (args: { url: string }): Promise<string> => {
 
-//         await page.authenticate('username', 'password'); //username and password are secrets stored in the environment and the names would be revealed by matching the url pattern to d1 table `site_config`      
+//         // NOTE: page.authenticate() is for HTTP BASIC AUTH only, NOT form-based login
+//         // For form-based login, use DOM manipulation as shown below:
+//         
+//         // Example: Simple form-based authentication
+//         // await page.type('input[type="email"]', username);
+//         // await page.type('input[type="password"]', password);
+//         // await page.click('button[type="submit"]');
+//         // await page.waitForNavigation();      
 //       // Navigate to the website
 //       await page.goto(args.url);
 

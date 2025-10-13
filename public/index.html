@@ -55,15 +55,32 @@
             const visionEntry = document.createElement('div');
             visionEntry.className = 'bg-gray-700 p-4 rounded-md';
             visionEntry.innerHTML = `
-                <p class="text-cyan-300 mb-2 font-medium">🤖 AI Analysis:</p>
+                <p class="text-cyan-300 mb-2 font-medium">📸 Screenshot Analysis:</p>
                 <p class="text-gray-300 text-sm mb-3">${description}</p>
-                <img src="${imageUrl}" class="rounded-md border-2 border-gray-600" alt="AI Vision Screenshot" />
+                <img src="${imageUrl}" class="rounded-md border-2 border-gray-600 max-w-full h-auto" alt="AI Vision Screenshot" />
             `;
             // Clear placeholder if it exists
             if (visionFeed.querySelector('p.text-gray-500')) {
                 visionFeed.innerHTML = '';
             }
             visionFeed.appendChild(visionEntry);
+            visionFeed.scrollTop = visionFeed.scrollHeight;
+        }
+
+        function addAIThought(message, reasoning, additionalData) {
+            const thoughtEntry = document.createElement('div');
+            thoughtEntry.className = 'bg-blue-900 p-4 rounded-md border-l-4 border-blue-400';
+            thoughtEntry.innerHTML = `
+                <p class="text-blue-300 mb-2 font-medium">🧠 AI Thought:</p>
+                <p class="text-gray-300 text-sm mb-2 font-semibold">${message}</p>
+                <p class="text-gray-400 text-xs mb-2">${reasoning}</p>
+                ${additionalData ? `<pre class="text-xs text-gray-500 bg-gray-800 p-2 rounded overflow-x-auto">${JSON.stringify(additionalData, null, 2)}</pre>` : ''}
+            `;
+            // Clear placeholder if it exists
+            if (visionFeed.querySelector('p.text-gray-500')) {
+                visionFeed.innerHTML = '';
+            }
+            visionFeed.appendChild(thoughtEntry);
             visionFeed.scrollTop = visionFeed.scrollHeight;
         }
 
@@ -82,13 +99,21 @@
                     
                     if (message.type === 'vision_update') {
                         addVision(message.data.description, message.data.imageUrl);
+                    } else if (message.type === 'ai_thought') {
+                        addAIThought(message.data.message, message.data.reasoning, message.data.additionalData);
                     } else if (message.type === 'error') {
-                        addLog(`WORKER ERROR: ${message.error}`, 'error');
+                        addLog(`ERROR: ${message.error}`, 'error');
                     } else if (message.type === 'status_update') {
-                        const level = message.data.status === 'error' ? 'error' : 'info';
-                        addLog(`[Job ${message.data.scrapeId}] ${message.data.message}`, level);
+                        const level = message.data.level || 'info';
+                        addLog(`[${message.data.category.toUpperCase()}] ${message.data.message}`, level);
+                    } else if (message.type === 'performance_update') {
+                        addLog(`⏱️ ${message.data.operation}: ${message.data.duration}ms`, 'info');
+                    } else if (message.type === 'welcome') {
+                        addLog(`Welcome: ${message.message}`, 'success');
                     } else {
-                        addLog(`Received: ${JSON.stringify(message.data)}`);
+                        // Fallback: safely display something meaningful even if `data` is undefined
+                        const payload = message.data ?? message.event ?? message.message ?? message;
+                        addLog(`Received: ${typeof payload === 'string' ? payload : JSON.stringify(payload)}`);
                     }
                 } catch (e) {
                     addLog(`Failed to parse message: ${event.data}`, 'error');
