@@ -1,21 +1,12 @@
 name = "playwright-auth-demo"
 main = "src/index.ts"
-compatibility_date = "2024-05-18"
+compatibility_date = "2024-05-30"
 compatibility_flags = ["nodejs_compat"]
+preview_urls = true
 
-[vars]
-AI_MODEL = "@cf/openai/gpt-oss-120b"
-
-[[r2_buckets]]
-binding = "R2_BUCKET"
-bucket_name = "playwright-auth-demo"
-preview_bucket_name = "playwright-auth-demo-preview"
-
-[[d1_databases]]
-binding = "DB"
-database_name = "playwright-auth-demo"
-database_id = "a495374e-f1a4-452c-9ed7-645408a455b1"
-preview_database_id = "playwright-auth-demo-preview"
+[observability]
+enabled = true
+head_sampling_rate = 1.0
 
 [ai]
 binding = "AI"
@@ -23,15 +14,34 @@ binding = "AI"
 [browser]
 binding = "BROWSER"
 
+[assets]
+directory = "./public"
+binding = "ASSETS"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "playwright-auth-demo"
+database_id = "481cb804-26bf-449d-9fb3-e0e1d24102b3"
+
+[[r2_buckets]]
+binding = "R2_BUCKET"
+bucket_name = "playwright-auth-demo"
+
 [[durable_objects.bindings]]
 name = "WEBSOCKET_HANDLER_DO"
 class_name = "WebSocketHandlerDO"
 
 [[migrations]]
 tag = "v1"
-new_classes = ["WebSocketHandlerDO"]
+new_sqlite_classes = ["WebSocketHandlerDO"]
 
-# Binding for static assets, served from the "./public" directory
-[assets]
-directory = "./public"
-binding = "ASSETS"
+# Environment variables for different authentication providers
+# Set these using: wrangler secret put LINKEDIN_USERNAME
+
+
+
+[vars]
+BUCKET_PUBLIC_BASE_URL = "https://pub-93e75376cf0541329e11138f54c72d62.r2.dev"
+# VISION_MODEL = "@cf/llava-hf/llava-1.5-7b-hf"
+# REASONING_MODEL = "@cf/meta/llama-4-scout-17b-16e-instruct"
+

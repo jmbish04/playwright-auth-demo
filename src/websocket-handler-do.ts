@@ -1,34 +1,159 @@
+/**
+ * @file src/websocket-handler-do.ts
+ * @description This file defines the Durable Object (`WebSocketHandlerDO`) responsible for managing WebSocket connections.
+ * As a Durable Object, it provides a single point of coordination for all connected WebSocket clients,
+ * maintaining a consistent state (the list of active sessions) and enabling broadcast functionality.
+ * This is crucial for ensuring all clients receive the same real-time updates during a scraping job.
+ * @see https://developers.cloudflare.com/workers/wrangler/workers-sites/
+ */
+
+// Env is globally available from worker-configuration.d.ts
 import { WebSocketHandler } from './websocket-handler';
-import type { Env } from './types';
 
+// Define the structure of a WebSocket message for clarity.
+interface WSMessage {
+  type: string;
+  data?: any;
+}
+
+/**
+ * @class WebSocketHandlerDO
+ * @description A Cloudflare Durable Object that manages and broadcasts WebSocket messages.
+ * It maintains an in-memory array of active WebSocket sessions. When a message needs to be
+ * sent to all clients (broadcast), this object iterates through the sessions and sends the message.
+ * It also handles the lifecycle of WebSocket connections, including setup, message handling, and cleanup on close/error.
+ */
 export class WebSocketHandlerDO {
+  /** @description The state provided by the Durable Object runtime for hibernation API. */
   state: DurableObjectState;
+  /** @description The Cloudflare environment bindings, passed from the worker. */
   env: Env;
-  webSocketHandler?: WebSocketHandler;
 
+  /**
+   * @constructor
+   * @param {DurableObjectState} state - The Durable Object's state container.
+   * @param {Env} env - The worker's environment bindings.
+   */
   constructor(state: DurableObjectState, env: Env) {
     this.state = state;
     this.env = env;
   }
 
+  /**
+   * @method fetch
+   * @description The entry point for all requests to the Durable Object. Handles both
+   * WebSocket upgrades and internal broadcast requests.
+   * @param {Request} request - The incoming HTTP request.
+   * @returns {Promise<Response>} A response that establishes the WebSocket connection or handles broadcast.
+   */
   async fetch(request: Request): Promise<Response> {
-    // Create a new WebSocket pair
+    const url = new URL(request.url);
+    
+    // Handle internal broadcast requests
+    if (url.pathname === '/broadcast' && request.method === 'POST') {
+      try {
+        const logEvent = await request.json();
+        this.broadcast({
+          type: 'log',
+          event: logEvent
+        });
+        return new Response('OK', { status: 200 });
+      } catch (error) {
+        console.error('Failed to handle broadcast request:', error);
+        return new Response('Internal Server Error', { status: 500 });
+      }
+    }
+
+    // Handle WebSocket upgrade requests
+    const upgradeHeader = request.headers.get('Upgrade');
+    if (!upgradeHeader || upgradeHeader !== 'websocket') {
+      return new Response('Expected WebSocket upgrade', { status: 426 });
+    }
+
+    if (request.method !== 'GET') {
+      return new Response('Expected GET method for WebSocket upgrade', { status: 400 });
+    }
+
+    // Create a WebSocket pair: one side for the client, one for the server (this DO).
     const { 0: client, 1: server } = new WebSocketPair();
+    
+    // Use hibernation API for better performance
+    this.state.acceptWebSocket(server);
+    
+    // Send welcome message to new client
+    server.send(JSON.stringify({
+      type: 'welcome',
+      message: 'Connected to AI Scraper Live Status',
+      timestamp: new Date().toISOString(),
+      connectionCount: this.state.getWebSockets().length
+    }));
 
-    // The server-side WebSocket is now the one we work with
-    await this.handleSession(server);
+    // Return the client-side of the WebSocket to the user, completing the upgrade.
+    return new Response(null, { status: 101, webSocket: client });
+  }
 
-    // The client-side WebSocket is returned to the client
-    return new Response(null, {
-      status: 101,
-      webSocket: client,
+
+  /**
+   * @method broadcast
+   * @description Sends a message to all currently connected WebSocket clients using hibernation API.
+   * @param {any} message - The message object to be broadcast.
+   */
+  broadcast(message: any) {
+    const serializedMessage = JSON.stringify(message);
+    
+    // Use hibernation API to get all WebSocket connections
+    const webSockets = this.state.getWebSockets();
+    
+    webSockets.forEach(ws => {
+      try {
+        ws.send(serializedMessage);
+      } catch (error) {
+        console.error('Failed to send message to WebSocket client:', error);
+        // The hibernation API will automatically clean up dead connections
+      }
     });
   }
 
-  async handleSession(ws: WebSocket) {
-    // This is where the WebSocket connection is established.
-    // We can now pass it to our existing handler logic.
-    ws.accept();
-    this.webSocketHandler = new WebSocketHandler(ws, this.env);
+  /**
+   * WebSocket hibernation API handlers
+   */
+  async webSocketMessage(ws: WebSocket, message: ArrayBuffer | string) {
+    try {
+      const messageStr = typeof message === 'string' ? message : new TextDecoder().decode(message);
+      const parsedMessage: WSMessage = JSON.parse(messageStr);
+      
+      // Instantiate the logic handler to process the message.
+      const handler = new WebSocketHandler(this, this.env);
+      await handler.handleMessage(parsedMessage);
+    } catch (error) {
+      // If the message is invalid, inform all clients.
+      this.broadcast({ 
+        type: 'error', 
+        error: `Invalid message: ${error instanceof Error ? error.message : String(error)}` 
+      });
+    }
+  }
+
+  async webSocketClose(ws: WebSocket, code: number, reason: string, wasClean: boolean) {
+    // Hibernation API automatically handles cleanup
+    console.log(`WebSocket closed: code=${code}, reason=${reason}, wasClean=${wasClean}`);
+    
+    // Notify remaining clients about disconnection
+    this.broadcast({
+      type: 'client_disconnected',
+      connectionCount: this.state.getWebSockets().length,
+      timestamp: new Date().toISOString()
+    });
+  }
+
+  async webSocketError(ws: WebSocket, error: Error) {
+    console.error('WebSocket error:', error);
+    
+    // Notify clients about the error
+    this.broadcast({
+      type: 'websocket_error',
+      error: error.message,
+      timestamp: new Date().toISOString()
+    });
   }
 }

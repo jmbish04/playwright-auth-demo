@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en" class="bg-gray-900 text-white">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Scraper Live Status</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="p-4 sm:p-8">
+    <div class="max-w-6xl mx-auto">
+        <header class="mb-8">
+            <h1 class="text-4xl font-bold text-cyan-400">AI Scraper Live Status</h1>
+            <p id="conn-status" class="mt-2 text-lg text-gray-400">Connecting to worker...</p>
+        </header>
+
+        <main class="grid grid-cols-1 md:grid-cols-2 gap-8">
+            <!-- Status & Errors Column -->
+            <div class="bg-gray-800 p-6 rounded-lg shadow-lg">
+                <h2 class="text-2xl font-semibold text-gray-200 border-b border-gray-700 pb-3 mb-4">Event Log</h2>
+                <div id="status-log" class="h-96 overflow-y-auto space-y-3 text-sm">
+                    <!-- Log messages will appear here -->
+                </div>
+            </div>
+
+            <!-- AI Vision Column -->
+            <div class="bg-gray-800 p-6 rounded-lg shadow-lg">
+                <h2 class="text-2xl font-semibold text-gray-200 border-b border-gray-700 pb-3 mb-4">AI Vision Feed</h2>
+                <div id="vision-feed" class="h-96 overflow-y-auto space-y-6">
+                    <p class="text-gray-500">AI thoughts and screenshots will appear here in real-time.</p>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        const connStatus = document.getElementById('conn-status');
+        const statusLog = document.getElementById('status-log');
+        const visionFeed = document.getElementById('vision-feed');
+
+        function addLog(message, level = 'info') {
+            const colors = {
+                info: 'text-gray-300',
+                success: 'text-green-400',
+                error: 'text-red-400',
+                warn: 'text-yellow-400'
+            };
+            const logEntry = document.createElement('div');
+            logEntry.className = `font-mono ${colors[level]}`;
+            logEntry.innerHTML = `<span class="font-bold">[${new Date().toLocaleTimeString()}]</span> ${message}`;
+            statusLog.appendChild(logEntry);
+            statusLog.scrollTop = statusLog.scrollHeight;
+        }
+
+        function addVision(description, imageUrl) {
+            const visionEntry = document.createElement('div');
+            visionEntry.className = 'bg-gray-700 p-4 rounded-md';
+            visionEntry.innerHTML = `
+                <p class="text-cyan-300 mb-2 font-medium">🤖 AI Analysis:</p>
+                <p class="text-gray-300 text-sm mb-3">${description}</p>
+                <img src="${imageUrl}" class="rounded-md border-2 border-gray-600" alt="AI Vision Screenshot" />
+            `;
+            // Clear placeholder if it exists
+            if (visionFeed.querySelector('p.text-gray-500')) {
+                visionFeed.innerHTML = '';
+            }
+            visionFeed.appendChild(visionEntry);
+            visionFeed.scrollTop = visionFeed.scrollHeight;
+        }
+
+        try {
+            const ws = new WebSocket(`wss://${window.location.host}/ws`);
+
+            ws.onopen = () => {
+                connStatus.textContent = 'WebSocket connection established. Ready for jobs.';
+                connStatus.className = 'mt-2 text-lg text-green-400';
+                addLog('WebSocket connected.', 'success');
+            };
+
+            ws.onmessage = (event) => {
+                try {
+                    const message = JSON.parse(event.data);
+                    
+                    if (message.type === 'vision_update') {
+                        addVision(message.data.description, message.data.imageUrl);
+                    } else if (message.type === 'error') {
+                        addLog(`WORKER ERROR: ${message.error}`, 'error');
+                    } else if (message.type === 'status_update') {
+                        const level = message.data.status === 'error' ? 'error' : 'info';
+                        addLog(`[Job ${message.data.scrapeId}] ${message.data.message}`, level);
+                    } else {
+                        addLog(`Received: ${JSON.stringify(message.data)}`);
+                    }
+                } catch (e) {
+                    addLog(`Failed to parse message: ${event.data}`, 'error');
+                    console.error("Message parse error:", e);
+                }
+            };
+
+            ws.onerror = (error) => {
+                connStatus.textContent = 'WebSocket connection error.';
+                connStatus.className = 'mt-2 text-lg text-red-400';
+                addLog('WebSocket connection error. See browser console for details.', 'error');
+                console.error("WebSocket Error:", error);
+            };
+
+            ws.onclose = (event) => {
+                connStatus.textContent = `WebSocket disconnected (Code: ${event.code}).`;
+                connStatus.className = 'mt-2 text-lg text-yellow-400';
+                addLog(`WebSocket disconnected. Clean disconnect: ${event.wasClean}`, event.wasClean ? 'warn' : 'error');
+            };
+
+        } catch (e) {
+            connStatus.textContent = 'Failed to create WebSocket.';
+            connStatus.className = 'mt-2 text-lg text-red-400';
+            addLog(`CRITICAL: Could not create WebSocket: ${e.message}`, 'error');
+            console.error("WebSocket creation failed:", e);
+        }
+    </script>
+</body>
+</html>
