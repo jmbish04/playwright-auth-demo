@@ -202,9 +202,12 @@ const interviewPrepSchema = z.object({
 
 export const jobPostingSchema = z.object({
   // Core
-  jobTitle: z.string().min(1).optional().default("n/a"),
-  companyName: z.string().min(1).optional().default("n/a"),
-  location: z.string().min(1).optional().default("n/a"),
+  /** @description The title of the job position (e.g., "Senior Software Engineer"). */
+  jobTitle: z.string().min(1).optional().default("n/a").describe("The title of the job position."),
+  /** @description The name of the company that is hiring. */
+  companyName: z.string().min(1).optional().default("n/a").describe("The name of the company hiring."),
+  /** @description The primary, unparsed location string (e.g., "San Francisco, CA"). */
+  location: z.string().min(1).optional().default("n/a").describe("Primary location string."),
 
   // Rich org + location detail
   organization: orgSchema,
